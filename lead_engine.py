@@ -579,144 +579,148 @@ def overpass_indir(query):
 # ============================================================
 
 def rota_olustur(isletmeler, start_lat, start_lon):
+    """
+    v3.4 TİCARİ KORİDOR KİLİDİ
+
+    Amaç:
+    - Başlangıca yakın ve yoğun bir ticari kümeyi seç.
+    - Aynı koridordaki yakın lead'leri süpür.
+    - Sırf daha fazla lead var diye uzak mahalle/kümelere atlama.
+    - Lead sayısından çok lead / yürüyüş verimliliğini koru.
+    """
     if not isletmeler:
         return []
 
     kalan = isletmeler.copy()
     rota = []
 
-    MAX_ROTA = MAX_ISLETME
-    MAX_TAHMINI_ROTA = 5200
-    MAX_KUME_GECISI = 1900
-    YOGUNLUK_YARICAPI = 420
+    MAX_ROTA = min(MAX_ISLETME, 18)
+    MAX_TAHMINI_ROTA = 3000
+
+    # Koridor parametreleri
+    YOGUNLUK_YARICAPI = 300
+    ILK_KUME_YARICAPI = 520
+    KORIDOR_ADIMI = 420
+    SERT_ADIM_LIMITI = 650
+    KUME_GENISLEME_LIMITI = 900
 
     toplam = 0.0
 
     def mesafe(a, b):
         return haversine(
-            a["lat"],
-            a["lon"],
-            b["lat"],
-            b["lon"]
+            a["lat"], a["lon"],
+            b["lat"], b["lon"]
         )
 
     def baslangic_mesafe(a):
         return haversine(
-            start_lat,
-            start_lon,
-            a["lat"],
-            a["lon"]
+            start_lat, start_lon,
+            a["lat"], a["lon"]
         )
 
-    def komsu_sayisi(aday, havuz):
+    def komsu_sayisi(aday, havuz, yaricap=YOGUNLUK_YARICAPI):
         return sum(
-            1
-            for diger in havuz
+            1 for diger in havuz
             if diger is not aday
-            and mesafe(aday, diger) <= YOGUNLUK_YARICAPI
+            and mesafe(aday, diger) <= yaricap
         )
 
+    # --------------------------------------------------------
+    # 1) BAŞLANGICA YAKIN EN VERİMLİ TİCARİ ÇEKİRDEĞİ BUL
+    # --------------------------------------------------------
     ilk_adaylar = []
 
     for aday in kalan:
         d = baslangic_mesafe(aday)
         yogunluk = komsu_sayisi(aday, kalan)
 
-        maliyet = d / max(
-            1.0,
-            1.0 + yogunluk * 0.52
-        )
+        # Uzak ama çok yoğun kümelerin başlangıca yakın caddeyi
+        # ezmesini engelle: mesafe güçlü biçimde önemini korur.
+        maliyet = d / max(1.0, 1.0 + min(yogunluk, 6) * 0.28)
 
-        ilk_adaylar.append(
-            (maliyet, d, aday)
-        )
+        ilk_adaylar.append((maliyet, d, -yogunluk, aday))
 
-    ilk_adaylar.sort(
-        key=lambda x: (x[0], x[1])
-    )
+    ilk_adaylar.sort(key=lambda x: (x[0], x[1], x[2]))
 
-    ilk = ilk_adaylar[0][2]
-    ilk_d = ilk_adaylar[0][1]
-
+    _, ilk_d, _, ilk = ilk_adaylar[0]
     rota.append(ilk)
     kalan.remove(ilk)
     toplam += ilk_d
 
+    # İlk seçilen ticari çekirdeğin merkezi.
+    cekirdek_lat = ilk["lat"]
+    cekirdek_lon = ilk["lon"]
+
+    # --------------------------------------------------------
+    # 2) AYNI TİCARİ KORİDORU SÜPÜR
+    # --------------------------------------------------------
     while kalan and len(rota) < MAX_ROTA:
         mevcut = rota[-1]
         adaylar = []
 
         for aday in kalan:
             d = mesafe(mevcut, aday)
-            yogunluk = komsu_sayisi(
-                aday,
-                kalan
+
+            # Tek adımda başka mahalleye sıçrama yok.
+            if d > SERT_ADIM_LIMITI:
+                continue
+
+            cekirdege = haversine(
+                cekirdek_lat, cekirdek_lon,
+                aday["lat"], aday["lon"]
             )
 
-            if d > MAX_KUME_GECISI:
+            # Seçilen ticari aksın çok dışına taşma.
+            if cekirdege > KUME_GENISLEME_LIMITI:
                 continue
 
-            if d > 700 and yogunluk == 0:
+            yogunluk = komsu_sayisi(aday, kalan)
+
+            # Normalde birbirine yakın dükkânları takip et.
+            # 420m üzeri geçiş ancak karşı tarafta anlamlı yoğunluk varsa.
+            if d > KORIDOR_ADIMI and yogunluk < 2:
                 continue
 
+            # Rotayı kilometre uğruna şişirme.
             if toplam + d > MAX_TAHMINI_ROTA:
                 continue
 
             etkin = d / max(
                 1.0,
-                (1 + yogunluk) ** 0.72
+                1.0 + min(yogunluk, 5) * 0.22
             )
 
-            if d <= 180:
-                etkin *= 0.66
-            elif d <= 450:
-                etkin *= 0.84
+            # Cadde üzerindeki çok yakın ardışık işletmelere güçlü öncelik.
+            if d <= 120:
+                etkin *= 0.50
+            elif d <= 250:
+                etkin *= 0.70
+            elif d <= 420:
+                etkin *= 0.90
 
-            adaylar.append(
-                (etkin, d, aday)
-            )
+            # Çekirdeğin dışına doğru gereksiz açılmayı cezalandır.
+            if cekirdege > ILK_KUME_YARICAPI:
+                etkin *= 1.25
+
+            adaylar.append((etkin, d, cekirdege, aday))
 
         if not adaylar:
-            # Yakın küme bittiyse rotayı tamamen kesme.
-            # Kalan qualified lead'ler arasından rota bütçesine sığan
-            # en yakın yeni ticari kümeye geç.
-            gecis_adaylari = []
+            # v3.3'teki uzak kümeye zorla geçiş burada BİLEREK yok.
+            # Koridor bittiyse saha rotası da biter.
+            break
 
-            for aday in kalan:
-                d = mesafe(mevcut, aday)
-
-                if toplam + d <= MAX_TAHMINI_ROTA:
-                    yogunluk = komsu_sayisi(aday, kalan)
-                    gecis_maliyeti = d / max(
-                        1.0,
-                        (1 + yogunluk) ** 0.80
-                    )
-                    gecis_adaylari.append(
-                        (gecis_maliyeti, d, aday)
-                    )
-
-            if not gecis_adaylari:
-                break
-
-            gecis_adaylari.sort(
-                key=lambda x: (x[0], x[1])
-            )
-
-            _, d, sonraki = gecis_adaylari[0]
-            rota.append(sonraki)
-            kalan.remove(sonraki)
-            toplam += d
-            continue
-
-        adaylar.sort(
-            key=lambda x: (x[0], x[1])
-        )
-
-        _, d, sonraki = adaylar[0]
+        adaylar.sort(key=lambda x: (x[0], x[1], x[2]))
+        _, d, _, sonraki = adaylar[0]
 
         rota.append(sonraki)
         kalan.remove(sonraki)
         toplam += d
+
+        # Koridor merkezi yavaşça yürüyüş yönüne kayar; böylece uzun bir
+        # cadde boyunca ilerleyebilir ama ani mahalle sıçraması yapmaz.
+        n = len(rota)
+        cekirdek_lat = ((cekirdek_lat * (n - 1)) + sonraki["lat"]) / n
+        cekirdek_lon = ((cekirdek_lon * (n - 1)) + sonraki["lon"]) / n
 
     return rota
 
