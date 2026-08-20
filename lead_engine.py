@@ -735,9 +735,25 @@ def rota_olustur(isletmeler, start_lat, start_lon):
             adaylar.append((etkin, d, cekirdege, aday))
 
         if not adaylar:
-            # v3.3'teki uzak kümeye zorla geçiş burada BİLEREK yok.
-            # Koridor bittiyse saha rotası da biter.
-            break
+            # Koridor filtresi aday bırakmadıysa, gerçekten yakın bir qualified
+            # lead var mı kontrol et. 550 m içindeyse aynı saha koridorunun
+            # devamı kabul edilir; daha uzağa mahalle sıçraması yapılmaz.
+            yakinlar = []
+            for aday in kalan:
+                d = mesafe(mevcut, aday)
+                if d <= 550:
+                    yakinlar.append((d, aday))
+
+            if not yakinlar:
+                break
+
+            yakinlar.sort(key=lambda x: x[0])
+            d, sonraki = yakinlar[0]
+
+            rota.append(sonraki)
+            kalan.remove(sonraki)
+            toplam += d
+            continue
 
         adaylar.sort(key=lambda x: (x[0], x[1], x[2]))
         _, d, _, sonraki = adaylar[0]
@@ -907,6 +923,8 @@ out center tags;
         return {
             "leads": [],
             "summary": {
+                "raw_osm": len(elements),
+                "sector_candidates": len(ham_isletmeler),
                 "qualified": 0,
                 "route_count": 0,
                 "walk_km": 0,
@@ -979,6 +997,8 @@ out center tags;
         "leads": harita_verisi,
 
         "summary": {
+            "raw_osm": len(elements),
+            "sector_candidates": len(ham_isletmeler),
             "qualified": len(temiz),
             "route_count": len(harita_verisi),
             "walk_km": walk_km,
