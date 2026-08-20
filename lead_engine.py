@@ -595,14 +595,14 @@ def rota_olustur(isletmeler, start_lat, start_lon):
     rota = []
 
     MAX_ROTA = min(MAX_ISLETME, 20)
-    MAX_TAHMINI_ROTA = 2600
+    MAX_TAHMINI_ROTA = 4200
 
     # Koridor parametreleri
     YOGUNLUK_YARICAPI = 300
     ILK_KUME_YARICAPI = 520
     KORIDOR_ADIMI = 420
     SERT_ADIM_LIMITI = 500
-    KUME_GENISLEME_LIMITI = 950
+    KUME_GENISLEME_LIMITI = 1250
 
     toplam = 0.0
 
@@ -681,9 +681,12 @@ def rota_olustur(isletmeler, start_lat, start_lon):
             if d > KORIDOR_ADIMI and yogunluk < 2:
                 continue
 
-            # Rotayı kilometre uğruna şişirme.
+            # Kısa, verimli cadde adımlarında rota bütçesini esnet.
+            # Böylece aynı ticari koridorda 15-20 lead'e kadar süpürmeye devam eder;
+            # uzun/seyrek sıçramalar yine engellenir.
             if toplam + d > MAX_TAHMINI_ROTA:
-                continue
+                if not (d <= 220 and yogunluk >= 1 and len(rota) < MAX_ROTA):
+                    continue
 
             etkin = d / max(
                 1.0,
