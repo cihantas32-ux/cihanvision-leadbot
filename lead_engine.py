@@ -594,15 +594,15 @@ def rota_olustur(isletmeler, start_lat, start_lon):
     kalan = isletmeler.copy()
     rota = []
 
-    MAX_ROTA = min(MAX_ISLETME, 18)
-    MAX_TAHMINI_ROTA = 3000
+    MAX_ROTA = min(MAX_ISLETME, 14)
+    MAX_TAHMINI_ROTA = 1800
 
     # Koridor parametreleri
     YOGUNLUK_YARICAPI = 300
     ILK_KUME_YARICAPI = 520
     KORIDOR_ADIMI = 420
-    SERT_ADIM_LIMITI = 650
-    KUME_GENISLEME_LIMITI = 900
+    SERT_ADIM_LIMITI = 500
+    KUME_GENISLEME_LIMITI = 700
 
     toplam = 0.0
 
