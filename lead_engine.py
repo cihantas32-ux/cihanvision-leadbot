@@ -105,6 +105,29 @@ def sektor_bul(tags):
     ]:
         return "Otomotiv"
 
+    if shop in [
+        "clothes",
+        "shoes",
+        "jewelry",
+        "optician",
+        "florist",
+        "gift",
+        "mobile_phone",
+        "computer",
+        "hardware",
+        "doityourself",
+        "paint",
+        "curtain",
+        "fabric",
+        "cosmetics",
+        "perfumery",
+        "sports",
+        "boutique",
+        "pet",
+        "travel_agency"
+    ]:
+        return "Yerel Mağaza / Perakende"
+
     return None
 
 
@@ -411,6 +434,7 @@ def lead_skoru_hesapla(isletme):
         "Elektronik / Beyaz Eşya": 25,
         "Ev / Dekorasyon": 24,
         "Otomotiv": 23,
+        "Yerel Mağaza / Perakende": 22,
         "Restoran": 18,
         "Kafe": 16
     }
@@ -749,7 +773,7 @@ def make_leads(lat, lon):
     ["healthcare"~"^(clinic|dentist|physiotherapist)$"];
 
   nwr(around:{ARAMA_YARICAPI},{lat},{lon})
-    ["shop"~"^(hairdresser|beauty|furniture|interior_decoration|kitchen|bed|carpet|appliance|electronics|electrical|houseware|bathroom_furnishing|lighting|tiles|flooring|car|car_repair|tyres)$"];
+    ["shop"~"^(hairdresser|beauty|furniture|interior_decoration|kitchen|bed|carpet|appliance|electronics|electrical|houseware|bathroom_furnishing|lighting|tiles|flooring|car|car_repair|tyres|clothes|shoes|jewelry|optician|florist|gift|mobile_phone|computer|hardware|doityourself|paint|curtain|fabric|cosmetics|perfumery|sports|boutique|pet|travel_agency)$"];
 );
 out center tags;
 """
