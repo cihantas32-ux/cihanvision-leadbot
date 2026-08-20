@@ -5,7 +5,7 @@ import re
 import time
 
 print()
-print("--- CIHAN VISION LEAD BOT v2.1M MOBILE FAST ---")
+print("--- CIHAN VISION LEAD BOT v2.2 MOBILE TURBO ---")
 print("Nitelikli yerel işletmeler ve akıllı saha rotası hazırlanıyor...")
 print()
 
@@ -997,53 +997,31 @@ def rota_olustur(isletmeler):
     kalan = isletmeler.copy()
     rota = []
 
-    # Mobil sürüm:
-    # Yoğunluk ve ön eleme kuş uçuşu ile yapılır.
-    # Gerçek OSRM yaya sorgusu yalnızca kısa listedeki adaylara atılır.
+    # MOBILE TURBO:
+    # Rota seçerken hiçbir OSRM/yaya API çağrısı yapma.
+    # Coğrafi mesafe + lead yoğunluğu ile rotayı seç.
+    # Gerçek yaya mesafeleri daha sonra sadece seçilmiş etaplar için hesaplanır.
     YAKIN_ETAP = 450
     COK_YAKIN = 180
     YOGUNLUK_YARICAPI = 420
-    RAHAT_TEKIL_GECIS = 700
-    MAX_KUME_GECISI = 1350
-
-    MAX_YAYA_ROTA = 4200
+    MAX_KUME_GECISI = 1200
+    MAX_TAHMINI_ROTA = 3600
     MAX_ROTA = MAX_ISLETME
 
-    # Her turda en fazla bu kadar aday için gerçek yaya sorgusu.
-    ILK_KISA_LISTE = 8
-    TUR_KISA_LISTE = 7
-
-    toplam_yaya = 0.0
+    toplam_tahmini = 0.0
     onceki = None
 
-    baslangic_noktasi = {
-        "lat": BASLANGIC_LAT,
-        "lon": BASLANGIC_LON
-    }
-
     def kus_mesafe(a, b):
-        return haversine(
-            a["lat"], a["lon"],
-            b["lat"], b["lon"]
+        return haversine(a["lat"], a["lon"], b["lat"], b["lon"])
+
+    def baslangic_mesafe(a):
+        return haversine(BASLANGIC_LAT, BASLANGIC_LON, a["lat"], a["lon"])
+
+    def komsu_sayisi(aday, havuz, yaricap=YOGUNLUK_YARICAPI):
+        return sum(
+            1 for diger in havuz
+            if diger is not aday and kus_mesafe(aday, diger) <= yaricap
         )
-
-    def gercek_mesafe(a, b):
-        return yaya_mesafesi(a, b)[0]
-
-    def baslangica_yaya(a):
-        return gercek_mesafe(baslangic_noktasi, a)
-
-    def komsu_sayisi_hizli(aday, havuz, yaricap=YOGUNLUK_YARICAPI):
-        # KRİTİK HIZLANDIRMA:
-        # Burada OSRM çağrısı YOK. Ticari yoğunluk coğrafi yakınlıkla
-        # tahmin edilir; gerçek yaya mesafesi rota seçiminde kullanılır.
-        sayi = 0
-        for diger in havuz:
-            if diger is aday:
-                continue
-            if kus_mesafe(aday, diger) <= yaricap:
-                sayi += 1
-        return sayi
 
     def geri_donus_cezasi(prev, mevcut, aday):
         if prev is None:
@@ -1063,143 +1041,62 @@ def rota_olustur(isletmeler):
         cos_acisi = (ax * bx + ay * by) / (na * nb)
 
         if cos_acisi < -0.55:
-            return 220.0
+            return 230.0
         if cos_acisi < -0.15:
-            return 90.0
+            return 95.0
         return 0.0
 
-    # ========================================================
-    # İLK LEAD
-    # Önce coğrafi + yoğunluk skoru ile kısa liste,
-    # sonra SADECE kısa listede gerçek yaya mesafesi.
-    # ========================================================
-
-    hizli_ilk = []
+    # İlk hedef: yakınlıktan çok yoğun ticari kümeyi ödüllendir.
+    ilk_adaylar = []
 
     for aday in kalan:
-        kus = haversine(
-            BASLANGIC_LAT, BASLANGIC_LON,
-            aday["lat"], aday["lon"]
-        )
-        yogunluk = komsu_sayisi_hizli(aday, kalan)
+        d = baslangic_mesafe(aday)
+        yogunluk = komsu_sayisi(aday, kalan)
 
-        # Yoğun kümeye yürümeyi ödüllendir.
-        hizli_maliyet = kus / max(1.0, 1.0 + yogunluk * 0.48)
-        hizli_ilk.append((hizli_maliyet, kus, -yogunluk, aday))
-
-    hizli_ilk.sort(key=lambda x: (x[0], x[1], x[2]))
-    on_adaylar = [x[3] for x in hizli_ilk[:min(ILK_KISA_LISTE, len(hizli_ilk))]]
-
-    ilk_skorlar = []
-
-    for aday in on_adaylar:
-        d = baslangica_yaya(aday)
-        yogunluk = komsu_sayisi_hizli(aday, kalan)
+        maliyet = d / max(1.0, 1.0 + yogunluk * 0.52)
 
         if d > 1500 and yogunluk == 0:
-            continue
+            maliyet += 1200
 
-        maliyet = d / max(1.0, 1.0 + yogunluk * 0.50)
-        ilk_skorlar.append((maliyet, d, -yogunluk, aday))
+        ilk_adaylar.append((maliyet, d, -yogunluk, aday))
 
-    if ilk_skorlar:
-        ilk_skorlar.sort(key=lambda x: (x[0], x[1], x[2]))
-        ilk = ilk_skorlar[0][3]
-        ilk_yaya = ilk_skorlar[0][1]
-    else:
-        ilk = on_adaylar[0]
-        ilk_yaya = baslangica_yaya(ilk)
+    ilk_adaylar.sort(key=lambda x: (x[0], x[1], x[2]))
+
+    ilk = ilk_adaylar[0][3]
+    ilk_d = ilk_adaylar[0][1]
 
     rota.append(ilk)
     kalan.remove(ilk)
-    toplam_yaya += ilk_yaya
+    toplam_tahmini += ilk_d
 
-    # ========================================================
-    # ANA ROTA
-    # Her turda önce ucuz coğrafi ön eleme, sonra en fazla
-    # TUR_KISA_LISTE aday için gerçek yaya routing.
-    # ========================================================
-
+    # Ticari aksı süpür.
     while kalan and len(rota) < MAX_ROTA:
 
         mevcut = rota[-1]
-        hizli_adaylar = []
-
-        for aday in kalan:
-            kus = kus_mesafe(mevcut, aday)
-            yogunluk = komsu_sayisi_hizli(aday, kalan)
-            kume = 1 + yogunluk
-
-            # Kuş uçuşu çok uzaktaysa OSRM sorgusu bile atma.
-            if kus > MAX_KUME_GECISI * 1.10:
-                continue
-
-            hizli_etkin = kus / max(
-                1.0,
-                min(kume, 6) ** 0.72
-            )
-
-            if kus <= COK_YAKIN:
-                hizli_etkin *= 0.70
-            elif kus <= YAKIN_ETAP:
-                hizli_etkin *= 0.86
-
-            hizli_etkin += geri_donus_cezasi(
-                onceki,
-                mevcut,
-                aday
-            )
-
-            hizli_adaylar.append(
-                (hizli_etkin, kus, -kume, aday)
-            )
-
-        if not hizli_adaylar:
-            break
-
-        hizli_adaylar.sort(key=lambda x: (x[0], x[1], x[2]))
-        on_adaylar = [
-            x[3] for x in hizli_adaylar[:min(TUR_KISA_LISTE, len(hizli_adaylar))]
-        ]
-
         adaylar = []
 
-        for aday in on_adaylar:
-            d = gercek_mesafe(mevcut, aday)
-            yogunluk = komsu_sayisi_hizli(aday, kalan)
+        for aday in kalan:
+            d = kus_mesafe(mevcut, aday)
+            yogunluk = komsu_sayisi(aday, kalan)
             kume = 1 + yogunluk
 
-            if d <= YAKIN_ETAP:
-                kabul = True
-            elif d <= RAHAT_TEKIL_GECIS:
-                kabul = True
-            elif d <= MAX_KUME_GECISI and kume >= 2:
-                kabul = True
-            else:
-                kabul = False
-
-            if not kabul:
+            if d > MAX_KUME_GECISI:
                 continue
 
-            if toplam_yaya + d > MAX_YAYA_ROTA:
+            if d > 700 and kume < 2:
                 continue
 
-            etkin = d / max(
-                1.0,
-                min(kume, 6) ** 0.72
-            )
+            if toplam_tahmini + d > MAX_TAHMINI_ROTA:
+                continue
+
+            etkin = d / max(1.0, min(kume, 6) ** 0.72)
 
             if d <= COK_YAKIN:
-                etkin *= 0.70
+                etkin *= 0.66
             elif d <= YAKIN_ETAP:
-                etkin *= 0.86
+                etkin *= 0.84
 
-            etkin += geri_donus_cezasi(
-                onceki,
-                mevcut,
-                aday
-            )
-
+            etkin += geri_donus_cezasi(onceki, mevcut, aday)
             adaylar.append((etkin, d, -kume, aday))
 
         if not adaylar:
@@ -1211,27 +1108,25 @@ def rota_olustur(isletmeler):
         onceki = mevcut
         rota.append(sonraki)
         kalan.remove(sonraki)
-        toplam_yaya += d
+        toplam_tahmini += d
 
-    # Debug raporu da API çağrısı üretmesin.
     debug = {
         "rotaya_alinan": len(rota),
         "atlanan": len(kalan),
         "uzak_izole": [],
         "rota_butcesi": [],
         "diger": [],
-        "gercek_yaya_butcesi": toplam_yaya
+        "gercek_yaya_butcesi": toplam_tahmini
     }
 
     if rota:
         son = rota[-1]
-
         for aday in kalan:
-            kus = kus_mesafe(son, aday)
+            d = kus_mesafe(son, aday)
 
-            if kus > MAX_KUME_GECISI:
+            if d > MAX_KUME_GECISI:
                 debug["uzak_izole"].append(aday["isim"])
-            elif toplam_yaya + (kus * 1.35) > MAX_YAYA_ROTA:
+            elif toplam_tahmini + d > MAX_TAHMINI_ROTA:
                 debug["rota_butcesi"].append(aday["isim"])
             else:
                 debug["diger"].append(aday["isim"])
