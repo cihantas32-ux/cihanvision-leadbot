@@ -600,9 +600,9 @@ def rota_olustur(isletmeler, start_lat, start_lon):
     # Koridor parametreleri
     YOGUNLUK_YARICAPI = 300
     ILK_KUME_YARICAPI = 520
-    KORIDOR_ADIMI = 420
-    SERT_ADIM_LIMITI = 500
-    KUME_GENISLEME_LIMITI = 1250
+    KORIDOR_ADIMI = 500
+    SERT_ADIM_LIMITI = 550
+    KUME_GENISLEME_LIMITI = 1800
 
     toplam = 0.0
 
@@ -676,16 +676,16 @@ def rota_olustur(isletmeler, start_lat, start_lon):
 
             yogunluk = komsu_sayisi(aday, kalan)
 
-            # Normalde birbirine yakın dükkânları takip et.
-            # 420m üzeri geçiş ancak karşı tarafta anlamlı yoğunluk varsa.
-            if d > KORIDOR_ADIMI and yogunluk < 2:
+            # Aynı ticari aks üzerinde ilerlerken tek başına duran bir sonraki
+            # işletmeyi de kabul et. Uzak mahalle sıçramasını SERT_ADIM_LIMITI keser.
+            if d > KORIDOR_ADIMI and yogunluk < 1:
                 continue
 
             # Kısa, verimli cadde adımlarında rota bütçesini esnet.
             # Böylece aynı ticari koridorda 15-20 lead'e kadar süpürmeye devam eder;
             # uzun/seyrek sıçramalar yine engellenir.
             if toplam + d > MAX_TAHMINI_ROTA:
-                if not (d <= 220 and yogunluk >= 1 and len(rota) < MAX_ROTA):
+                if not (d <= 350 and len(rota) < MAX_ROTA):
                     continue
 
             etkin = d / max(
