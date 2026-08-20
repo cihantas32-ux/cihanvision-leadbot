@@ -12,9 +12,9 @@ MAX_ISLETME = 30
 MIN_LEAD_SKORU = 55
 
 OVERPASS_SERVERS = [
-    "https://overpass-api.de/api/interpreter",
-    "https://overpass.kumi.systems/api/interpreter",
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
     "https://overpass.private.coffee/api/interpreter",
+    "https://overpass-api.de/api/interpreter",
 ]
 
 OSRM_URL = "https://routing.openstreetmap.de/routed-foot/route/v1/driving"
@@ -503,26 +503,74 @@ def kaliteli_lead_mi(isletme):
 # ============================================================
 
 def overpass_indir(query):
+    headers = {
+        "User-Agent": "CihanVisionLeadBot/3.2",
+        "Accept": "application/json",
+        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        "Referer": "https://cihanvision-leadbot.onrender.com/",
+    }
+
+    son_hatalar = []
+
+    # Her sunucuyu sırayla dene. Bir sunucu sorunluysa diğerine geç.
     for server in OVERPASS_SERVERS:
-        try:
-            r = requests.post(
-                server,
-                data={"data": query},
-                timeout=25,
-                headers={
-                    "User-Agent": "CihanVisionLeadBot-Web/3.0"
-                }
-            )
+        for deneme in range(2):
+            try:
+                r = requests.post(
+                    server,
+                    data={"data": query},
+                    timeout=(8, 28),
+                    headers=headers,
+                )
 
-            if r.status_code == 200:
-                data = r.json()
-                return data.get("elements", [])
+                if r.status_code == 200:
+                    try:
+                        data = r.json()
+                    except ValueError:
+                        son_hatalar.append(f"{server} JSON döndürmedi")
+                        break
 
-        except Exception:
-            pass
+                    elements = data.get("elements")
+                    if isinstance(elements, list):
+                        print(
+                            f"OVERPASS OK: {server} | "
+                            f"{len(elements)} kayıt",
+                            flush=True,
+                        )
+                        return elements
 
-        time.sleep(0.5)
+                    son_hatalar.append(f"{server} geçersiz cevap")
+                    break
 
+                son_hatalar.append(
+                    f"{server} HTTP {r.status_code}"
+                )
+
+                # Kota / geçici sunucu hatalarında kısa bekleyip bir kez daha dene.
+                if r.status_code in (429, 500, 502, 503, 504):
+                    time.sleep(2 + deneme)
+                    continue
+
+                break
+
+            except requests.Timeout:
+                son_hatalar.append(f"{server} timeout")
+                time.sleep(1 + deneme)
+
+            except requests.RequestException as e:
+                son_hatalar.append(
+                    f"{server} bağlantı hatası: {type(e).__name__}"
+                )
+                time.sleep(1)
+                break
+
+            except Exception as e:
+                son_hatalar.append(
+                    f"{server} beklenmeyen hata: {type(e).__name__}"
+                )
+                break
+
+    print("OVERPASS BAŞARISIZ:", " | ".join(son_hatalar), flush=True)
     return None
 
 
@@ -653,7 +701,7 @@ def make_leads(lat, lon):
     lon = float(lon)
 
     sorgu = f"""
-[out:json][timeout:25];
+[out:json][timeout:20];
 (
   nwr(around:{ARAMA_YARICAPI},{lat},{lon})
     ["amenity"~"^(restaurant|cafe|dentist|clinic)$"];
