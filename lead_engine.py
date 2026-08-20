@@ -9,7 +9,7 @@ import time
 
 ARAMA_YARICAPI = 1500
 MAX_ISLETME = 30
-MIN_LEAD_SKORU = 55
+MIN_LEAD_SKORU = 48
 
 OVERPASS_SERVERS = [
     "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
@@ -401,7 +401,7 @@ def lead_skoru_hesapla(isletme):
     sektor = isletme["sektor"]
     tags = isletme["tags"]
 
-    skor = 25
+    skor = 28
 
     sektor_bonus = {
         "Diş Kliniği": 35,
@@ -489,7 +489,10 @@ def kaliteli_lead_mi(isletme):
         if adres_var(tags):
             sinyal += 1
 
-        if sinyal == 0:
+        # Dijital izi olmayan restoran/kafeleri tamamen çöpe atmak yerine
+        # isim + konum verisi varsa düşük skorlu aday olarak havuzda tut.
+        # Mikro işletme filtresi yukarıda hâlâ aktif.
+        if sinyal == 0 and not isim.strip():
             return False
 
     if isletme["lead_skoru"] < MIN_LEAD_SKORU:
