@@ -5,7 +5,7 @@ import re
 import time
 
 print()
-print("--- CIHAN VISION LEAD BOT v2.2 MOBILE TURBO ---")
+print("--- CIHAN VISION LEAD BOT v2.3 FAST FAIL ---")
 print("Nitelikli yerel işletmeler ve akıllı saha rotası hazırlanıyor...")
 print()
 
@@ -574,7 +574,7 @@ def kaliteli_lead_mi(isletme):
 
 
 SORGU_1 = f"""
-[out:json][timeout:35];
+[out:json][timeout:12];
 (
   nwr(around:{ARAMA_YARICAPI},{BASLANGIC_LAT},{BASLANGIC_LON})
     ["amenity"~"^(restaurant|cafe|dentist|clinic)$"];
@@ -587,7 +587,7 @@ out center tags;
 
 
 SORGU_2 = f"""
-[out:json][timeout:35];
+[out:json][timeout:12];
 (
   nwr(around:{ARAMA_YARICAPI},{BASLANGIC_LAT},{BASLANGIC_LON})
     ["shop"~"^(hairdresser|beauty|furniture|interior_decoration|kitchen|bed|carpet|appliance|electronics|electrical|houseware|bathroom_furnishing|lighting|tiles|flooring|car|car_repair|tyres)$"];
@@ -609,9 +609,9 @@ def overpass_indir(query, sorgu_no):
             r = requests.post(
                 server,
                 data={"data": query},
-                timeout=50,
+                timeout=(3, 9),
                 headers={
-                    "User-Agent": "CihanVisionLeadBot/2.1M"
+                    "User-Agent": "CihanVisionLeadBot/2.3"
                 }
             )
 
@@ -632,12 +632,12 @@ def overpass_indir(query, sorgu_no):
         except Exception as e:
             print(f"   ⚠ {e}")
 
-        time.sleep(1)
+        time.sleep(0.25)
 
     return []
 
 
-def sorguyu_guvenli_al(query, sorgu_no, maksimum_tur=3):
+def sorguyu_guvenli_al(query, sorgu_no, maksimum_tur=1):
 
     for tur in range(1, maksimum_tur + 1):
 
@@ -965,8 +965,8 @@ def yaya_mesafesi(a, b):
     try:
         r = requests.get(
             url,
-            timeout=4,
-            headers={"User-Agent": "CihanVisionLeadBot/2.1M"}
+            timeout=(2, 3),
+            headers={"User-Agent": "CihanVisionLeadBot/2.3"}
         )
 
         if r.status_code == 200:
@@ -1514,7 +1514,7 @@ print(
 print()
 
 print(
-    "Rota motoru: REAL WALK FIELD ROUTER v2.1"
+    "Rota motoru: MOBILE TURBO ROUTER v2.3"
 )
 
 print(
