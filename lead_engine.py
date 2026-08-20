@@ -586,8 +586,8 @@ def rota_olustur(isletmeler, start_lat, start_lon):
     rota = []
 
     MAX_ROTA = MAX_ISLETME
-    MAX_TAHMINI_ROTA = 3600
-    MAX_KUME_GECISI = 1200
+    MAX_TAHMINI_ROTA = 5200
+    MAX_KUME_GECISI = 1900
     YOGUNLUK_YARICAPI = 420
 
     toplam = 0.0
@@ -677,7 +677,36 @@ def rota_olustur(isletmeler, start_lat, start_lon):
             )
 
         if not adaylar:
-            break
+            # Yakın küme bittiyse rotayı tamamen kesme.
+            # Kalan qualified lead'ler arasından rota bütçesine sığan
+            # en yakın yeni ticari kümeye geç.
+            gecis_adaylari = []
+
+            for aday in kalan:
+                d = mesafe(mevcut, aday)
+
+                if toplam + d <= MAX_TAHMINI_ROTA:
+                    yogunluk = komsu_sayisi(aday, kalan)
+                    gecis_maliyeti = d / max(
+                        1.0,
+                        (1 + yogunluk) ** 0.80
+                    )
+                    gecis_adaylari.append(
+                        (gecis_maliyeti, d, aday)
+                    )
+
+            if not gecis_adaylari:
+                break
+
+            gecis_adaylari.sort(
+                key=lambda x: (x[0], x[1])
+            )
+
+            _, d, sonraki = gecis_adaylari[0]
+            rota.append(sonraki)
+            kalan.remove(sonraki)
+            toplam += d
+            continue
 
         adaylar.sort(
             key=lambda x: (x[0], x[1])
