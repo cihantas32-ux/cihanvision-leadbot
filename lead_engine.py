@@ -621,7 +621,7 @@ def rota_olustur(isletmeler, start_lat, start_lon):
     rota = []
 
     MAX_ROTA = min(MAX_ISLETME, 20)
-    MAX_ADIM = 550
+    MAX_ADIM = 900
     YAKIN_BONUS = 250
 
     def mesafe(a, b):
@@ -678,6 +678,8 @@ def rota_olustur(isletmeler, start_lat, start_lon):
                 maliyet *= 0.55
             elif d <= YAKIN_BONUS:
                 maliyet *= 0.75
+            elif d > 550:
+                maliyet *= 1.80
 
             maliyet /= max(
                 1.0,
