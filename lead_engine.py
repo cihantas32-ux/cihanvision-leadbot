@@ -606,8 +606,9 @@ def overpass_indir(query):
 # ============================================================
 
 def rota_olustur(isletmeler, start_lat, start_lon):
+    print("### ROUTE_ENGINE_V4_5_1_ACTIVE ###", flush=True)
     """
-    v4.5 — SAHA ROTASI
+    v4.5.1 — SAHA ROTASI
 
     Başlangıca yakın, tek bir kompakt ticari cep seçer.
     20 lead uğruna başka mahalleye sürüklenmez.
