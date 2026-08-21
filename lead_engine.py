@@ -607,95 +607,112 @@ def overpass_indir(query):
 
 def rota_olustur(isletmeler, start_lat, start_lon):
     """
-    v4.2 — QUALIFIED KORİDOR SWEEP
+    v4.4 — KOMPAKT KÜME ROTASI
 
-    Qualified havuzdan başlangıca yakın bir lead seçer ve her adımda
-    en yakın kalan qualified lead'e ilerler. Tek adım 550 metreyi
-    aşarsa rota biter. Böylece aynı ticari bölgede 15-20 lead
-    toplanabilir ama başka mahalleye sert sıçrama yapılmaz.
+    Amaç: sayıyı 20'ye zorlamak yerine aynı ticari bölgede birbirine
+    bağlı lead'leri bulmak. Uzak kümelere atlamaz.
     """
     if not isletmeler:
         return []
 
-    kalan = isletmeler.copy()
-    rota = []
-
     MAX_ROTA = min(MAX_ISLETME, 20)
-    MAX_ADIM = 900
-    YAKIN_BONUS = 250
+    BAGLANTI = 400          # Aynı ticari küme sayılması için azami kuş uçuşu mesafe
+    MAX_ADIM = 450          # Rota içinde tek sıçrama üst sınırı
+    MAX_TOPLAM = 2800       # Toplam kuş uçuşu rota üst sınırı (metre)
+    MIN_HEDEF = 10
 
     def mesafe(a, b):
-        return haversine(
-            a["lat"], a["lon"],
-            b["lat"], b["lon"]
-        )
+        return haversine(a["lat"], a["lon"], b["lat"], b["lon"])
 
     def baslangic_mesafe(a):
-        return haversine(
-            start_lat, start_lon,
-            a["lat"], a["lon"]
-        )
+        return haversine(start_lat, start_lon, a["lat"], a["lon"])
 
-    def komsu_sayisi(aday, havuz, yaricap=300):
-        return sum(
-            1 for diger in havuz
-            if diger is not aday
-            and mesafe(aday, diger) <= yaricap
-        )
+    # 1) Qualified lead'leri 400 m bağlantılarla gerçek kümelere ayır.
+    n = len(isletmeler)
+    komsular = [[] for _ in range(n)]
 
-    # Başlangıca yakın, aynı zamanda çevresinde başka lead'ler bulunan
-    # bir ticari çekirdek seç.
-    ilk_adaylar = []
-    for aday in kalan:
-        d = baslangic_mesafe(aday)
-        yogunluk = komsu_sayisi(aday, kalan)
-        maliyet = d / max(1.0, 1.0 + min(yogunluk, 6) * 0.25)
-        ilk_adaylar.append((maliyet, d, -yogunluk, aday))
+    for i in range(n):
+        for j in range(i + 1, n):
+            if mesafe(isletmeler[i], isletmeler[j]) <= BAGLANTI:
+                komsular[i].append(j)
+                komsular[j].append(i)
 
-    ilk_adaylar.sort(key=lambda x: (x[0], x[1], x[2]))
-    _, _, _, ilk = ilk_adaylar[0]
+    ziyaret = set()
+    kumeler = []
 
-    rota.append(ilk)
+    for i in range(n):
+        if i in ziyaret:
+            continue
+
+        stack = [i]
+        ziyaret.add(i)
+        indeksler = []
+
+        while stack:
+            x = stack.pop()
+            indeksler.append(x)
+
+            for y in komsular[x]:
+                if y not in ziyaret:
+                    ziyaret.add(y)
+                    stack.append(y)
+
+        kumeler.append([isletmeler[k] for k in indeksler])
+
+    # 2) Önce yeterince büyük ve başlangıca yakın kümeyi seç.
+    #    20 lead uğruna başka mahalleye gitme.
+    def kume_puani(kume):
+        en_yakin = min(baslangic_mesafe(x) for x in kume)
+        boyut = len(kume)
+
+        # 10+ lead bulunan kümeler güçlü şekilde tercih edilir.
+        boyut_bonus = min(boyut, MAX_ROTA) * 55
+        if boyut >= MIN_HEDEF:
+            boyut_bonus += 450
+
+        return en_yakin - boyut_bonus
+
+    kumeler.sort(key=kume_puani)
+    secili = kumeler[0]
+
+    # 3) Seçilen kümede başlangıca en yakın lead'den başla.
+    kalan = secili.copy()
+    ilk = min(kalan, key=baslangic_mesafe)
+    rota = [ilk]
     kalan.remove(ilk)
+    toplam = 0.0
 
+    # 4) Yalnızca yakın komşularla ilerle.
+    #    Greedy tuzağına düşmemek için yakınlık + devamındaki komşu sayısını kullan.
     while kalan and len(rota) < MAX_ROTA:
         mevcut = rota[-1]
         adaylar = []
 
         for aday in kalan:
             d = mesafe(mevcut, aday)
-
-            # Başka mahalleye sert sıçrama yok.
             if d > MAX_ADIM:
                 continue
+            if toplam + d > MAX_TOPLAM:
+                continue
 
-            yogunluk = komsu_sayisi(aday, kalan)
-
-            # Esas kriter mesafe. Yoğunluk sadece küçük bir avantaj sağlar.
-            maliyet = d
-
-            if d <= 120:
-                maliyet *= 0.55
-            elif d <= YAKIN_BONUS:
-                maliyet *= 0.75
-            elif d > 550:
-                maliyet *= 1.80
-
-            maliyet /= max(
-                1.0,
-                1.0 + min(yogunluk, 4) * 0.10
+            devam = sum(
+                1 for diger in kalan
+                if diger is not aday and mesafe(aday, diger) <= BAGLANTI
             )
 
+            # Mesafe ana kriter; çıkmaz sokağa giren aday biraz cezalandırılır.
+            maliyet = d - min(devam, 6) * 18
             adaylar.append((maliyet, d, aday))
 
         if not adaylar:
             break
 
         adaylar.sort(key=lambda x: (x[0], x[1]))
-        _, _, sonraki = adaylar[0]
+        _, d, sonraki = adaylar[0]
 
         rota.append(sonraki)
         kalan.remove(sonraki)
+        toplam += d
 
     return rota
 
