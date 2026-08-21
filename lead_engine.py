@@ -606,16 +606,16 @@ def overpass_indir(query):
 # ============================================================
 
 def rota_olustur(isletmeler, start_lat, start_lon):
-    print("### ROUTE_ENGINE_V4_7_ACTIVE ###", flush=True)
+    print("### ROUTE_ENGINE_V4_8_ACTIVE ###", flush=True)
 
     if not isletmeler:
         return []
 
-    HEDEF = min(MAX_ISLETME, 10)
-    MAX_ILK_UZAKLIK = 1200
-    MAX_TOPLAM = 2300
-    NORMAL_ADIM = 320
-    KOPRU_ADIM = 650
+    # v4.8:
+    # 4'te kilitlenmeye sebep olan adım/merkez limitleri kaldırıldı.
+    # Önce başlangıca en yakın 10 qualified lead seçilir.
+    # Sonra bu 10 lead kendi içinde en kısa yakın-komşu sırasına dizilir.
+    HEDEF = min(10, MAX_ISLETME, len(isletmeler))
 
     def mesafe(a, b):
         return haversine(a["lat"], a["lon"], b["lat"], b["lon"])
@@ -623,63 +623,74 @@ def rota_olustur(isletmeler, start_lat, start_lon):
     def baslangic_mesafe(a):
         return haversine(start_lat, start_lon, a["lat"], a["lon"])
 
-    # Başlangıca yakın tüm qualified lead'leri kullan.
-    havuz = [x for x in isletmeler if baslangic_mesafe(x) <= MAX_ILK_UZAKLIK]
+    # En yakın 10 qualified işletmeyi KESİN aday yap.
+    secilen = sorted(
+        isletmeler,
+        key=lambda x: (baslangic_mesafe(x), -x.get("lead_skoru", 0))
+    )[:HEDEF]
 
-    # 10'a yetmiyorsa en yakın qualified lead'lerle havuzu tamamla.
-    if len(havuz) < HEDEF:
-        for x in sorted(isletmeler, key=baslangic_mesafe):
-            if x not in havuz:
-                havuz.append(x)
-            if len(havuz) >= HEDEF:
-                break
-
-    if not havuz:
+    if not secilen:
         return []
 
-    # İlk lead: başlangıca en yakın işletme.
-    ilk = min(havuz, key=baslangic_mesafe)
+    # Başlangıca en yakın lead ile başla.
+    ilk = min(secilen, key=baslangic_mesafe)
     rota = [ilk]
-    kalan = [x for x in havuz if x is not ilk]
-    toplam = baslangic_mesafe(ilk)
+    kalan = [x for x in secilen if x is not ilk]
 
-    while kalan and len(rota) < HEDEF:
+    # Seçilen 10 işletmenin tamamını en yakın-komşu mantığıyla sırala.
+    while kalan:
         mevcut = rota[-1]
 
-        # Önce çok yakın devam noktalarını ara.
-        yakin_adaylar = []
-        for aday in kalan:
-            adim = mesafe(mevcut, aday)
-            if adim <= NORMAL_ADIM and toplam + adim <= MAX_TOPLAM:
-                yakin_adaylar.append((adim, -aday.get("lead_skoru", 0), aday))
-
-        if yakin_adaylar:
-            yakin_adaylar.sort(key=lambda x: (x[0], x[1]))
-            adim, _, sonraki = yakin_adaylar[0]
-        else:
-            # Yakında lead kalmadıysa yalnızca bir sonraki en yakın qualified
-            # noktaya kontrollü köprü kur. Böylece 4'te kilitlenmez.
-            kopru_adaylar = []
-            for aday in kalan:
-                adim = mesafe(mevcut, aday)
-                if adim <= KOPRU_ADIM and toplam + adim <= MAX_TOPLAM:
-                    kopru_adaylar.append((adim, -aday.get("lead_skoru", 0), aday))
-
-            if not kopru_adaylar:
-                break
-
-            kopru_adaylar.sort(key=lambda x: (x[0], x[1]))
-            adim, _, sonraki = kopru_adaylar[0]
+        sonraki = min(
+            kalan,
+            key=lambda x: (
+                mesafe(mevcut, x),
+                -x.get("lead_skoru", 0)
+            )
+        )
 
         rota.append(sonraki)
         kalan.remove(sonraki)
-        toplam += adim
+
+    # Basit 2-opt iyileştirmesi:
+    # Aynı 10 noktayı korur, gereksiz zikzakları azaltır.
+    def rota_uzunlugu(r):
+        if not r:
+            return 0.0
+
+        toplam = baslangic_mesafe(r[0])
+
+        for i in range(len(r) - 1):
+            toplam += mesafe(r[i], r[i + 1])
+
+        return toplam
+
+    iyilesti = True
+    tur = 0
+
+    while iyilesti and tur < 20:
+        iyilesti = False
+        tur += 1
+        mevcut_uzunluk = rota_uzunlugu(rota)
+
+        for i in range(1, len(rota) - 1):
+            for j in range(i + 1, len(rota)):
+                aday_rota = rota[:i] + list(reversed(rota[i:j + 1])) + rota[j + 1:]
+                aday_uzunluk = rota_uzunlugu(aday_rota)
+
+                if aday_uzunluk + 1 < mevcut_uzunluk:
+                    rota = aday_rota
+                    mevcut_uzunluk = aday_uzunluk
+                    iyilesti = True
+
+    toplam = rota_uzunlugu(rota)
 
     print(
-        f"### V4_7_ROUTE count={len(rota)} route_budget_m={round(toplam)} "
-        f"pool={len(havuz)} ###",
+        f"### V4_8_ROUTE count={len(rota)} air_route_m={round(toplam)} "
+        f"qualified={len(isletmeler)} ###",
         flush=True
     )
+
     return rota
 
 
