@@ -607,19 +607,21 @@ def overpass_indir(query):
 
 def rota_olustur(isletmeler, start_lat, start_lon):
     """
-    v4.4 — KOMPAKT KÜME ROTASI
+    v4.5 — SAHA ROTASI
 
-    Amaç: sayıyı 20'ye zorlamak yerine aynı ticari bölgede birbirine
-    bağlı lead'leri bulmak. Uzak kümelere atlamaz.
+    Başlangıca yakın, tek bir kompakt ticari cep seçer.
+    20 lead uğruna başka mahalleye sürüklenmez.
+    Başlangıç -> ilk lead mesafesi de bütçeye dahildir.
     """
     if not isletmeler:
         return []
 
     MAX_ROTA = min(MAX_ISLETME, 20)
-    BAGLANTI = 400          # Aynı ticari küme sayılması için azami kuş uçuşu mesafe
-    MAX_ADIM = 450          # Rota içinde tek sıçrama üst sınırı
-    MAX_TOPLAM = 2800       # Toplam kuş uçuşu rota üst sınırı (metre)
-    MIN_HEDEF = 10
+    MAX_BASLANGIC_UZAKLIK = 1100
+    KUME_YARICAPI = 600
+    MAX_ADIM = 320
+    MAX_TOPLAM = 2400
+    MIN_HEDEF = 15
 
     def mesafe(a, b):
         return haversine(a["lat"], a["lon"], b["lat"], b["lon"])
@@ -627,92 +629,153 @@ def rota_olustur(isletmeler, start_lat, start_lon):
     def baslangic_mesafe(a):
         return haversine(start_lat, start_lon, a["lat"], a["lon"])
 
-    # 1) Qualified lead'leri 400 m bağlantılarla gerçek kümelere ayır.
-    n = len(isletmeler)
-    komsular = [[] for _ in range(n)]
+    # 1) Başlangıç çevresindeki qualified lead havuzu.
+    yakin_havuz = [
+        x for x in isletmeler
+        if baslangic_mesafe(x) <= MAX_BASLANGIC_UZAKLIK
+    ]
 
-    for i in range(n):
-        for j in range(i + 1, n):
-            if mesafe(isletmeler[i], isletmeler[j]) <= BAGLANTI:
-                komsular[i].append(j)
-                komsular[j].append(i)
+    # Seyrek bölgelerde tamamen boş kalmamak için fallback.
+    if len(yakin_havuz) < 5:
+        yakin_havuz = sorted(isletmeler, key=baslangic_mesafe)[
+            :min(len(isletmeler), 30)
+        ]
 
-    ziyaret = set()
-    kumeler = []
+    if not yakin_havuz:
+        return []
 
-    for i in range(n):
-        if i in ziyaret:
+    # 2) Zincirleme graph yerine sabit yarıçaplı ticari cep seç.
+    merkez_adaylari = []
+
+    for merkez in yakin_havuz:
+        cevre = [
+            x for x in yakin_havuz
+            if mesafe(merkez, x) <= KUME_YARICAPI
+        ]
+
+        adet = len(cevre)
+        if adet == 0:
             continue
 
-        stack = [i]
-        ziyaret.add(i)
-        indeksler = []
+        merkez_uzaklik = baslangic_mesafe(merkez)
 
-        while stack:
-            x = stack.pop()
-            indeksler.append(x)
+        puan = (
+            adet * 80
+            - merkez_uzaklik * 0.65
+        )
 
-            for y in komsular[x]:
-                if y not in ziyaret:
-                    ziyaret.add(y)
-                    stack.append(y)
+        if adet >= MIN_HEDEF:
+            puan += 250
 
-        kumeler.append([isletmeler[k] for k in indeksler])
+        merkez_adaylari.append(
+            (puan, adet, -merkez_uzaklik, merkez, cevre)
+        )
 
-    # 2) Önce yeterince büyük ve başlangıca yakın kümeyi seç.
-    #    20 lead uğruna başka mahalleye gitme.
-    def kume_puani(kume):
-        en_yakin = min(baslangic_mesafe(x) for x in kume)
-        boyut = len(kume)
+    if not merkez_adaylari:
+        return []
 
-        # 10+ lead bulunan kümeler güçlü şekilde tercih edilir.
-        boyut_bonus = min(boyut, MAX_ROTA) * 55
-        if boyut >= MIN_HEDEF:
-            boyut_bonus += 450
+    merkez_adaylari.sort(
+        key=lambda x: (x[0], x[1], x[2]),
+        reverse=True
+    )
 
-        return en_yakin - boyut_bonus
+    _, _, _, merkez, secili_havuz = merkez_adaylari[0]
 
-    kumeler.sort(key=kume_puani)
-    secili = kumeler[0]
-
-    # 3) Seçilen kümede başlangıca en yakın lead'den başla.
-    kalan = secili.copy()
-    ilk = min(kalan, key=baslangic_mesafe)
+    # 3) Başlangıca en yakın lead'den başla.
+    ilk = min(secili_havuz, key=baslangic_mesafe)
     rota = [ilk]
-    kalan.remove(ilk)
-    toplam = 0.0
 
-    # 4) Yalnızca yakın komşularla ilerle.
-    #    Greedy tuzağına düşmemek için yakınlık + devamındaki komşu sayısını kullan.
+    kalan = [
+        x for x in secili_havuz
+        if x is not ilk
+    ]
+
+    # Başlangıç -> ilk lead artık toplam bütçeye dahil.
+    toplam = baslangic_mesafe(ilk)
+
+    # 4) Aynı ticari cep içinde kompakt rota oluştur.
     while kalan and len(rota) < MAX_ROTA:
         mevcut = rota[-1]
         adaylar = []
 
         for aday in kalan:
-            d = mesafe(mevcut, aday)
-            if d > MAX_ADIM:
+            adim = mesafe(mevcut, aday)
+
+            if adim > MAX_ADIM:
                 continue
-            if toplam + d > MAX_TOPLAM:
+
+            if toplam + adim > MAX_TOPLAM:
+                continue
+
+            merkez_uzaklik = mesafe(merkez, aday)
+
+            if merkez_uzaklik > KUME_YARICAPI:
                 continue
 
             devam = sum(
-                1 for diger in kalan
-                if diger is not aday and mesafe(aday, diger) <= BAGLANTI
+                1
+                for diger in kalan
+                if diger is not aday
+                and mesafe(aday, diger) <= MAX_ADIM
             )
 
-            # Mesafe ana kriter; çıkmaz sokağa giren aday biraz cezalandırılır.
-            maliyet = d - min(devam, 6) * 18
-            adaylar.append((maliyet, d, aday))
+            lead_skoru = aday.get("lead_skoru", 0)
+
+            maliyet = (
+                adim
+                + merkez_uzaklik * 0.10
+                - min(devam, 8) * 15
+                - lead_skoru * 0.35
+            )
+
+            adaylar.append((maliyet, adim, aday))
 
         if not adaylar:
             break
 
         adaylar.sort(key=lambda x: (x[0], x[1]))
-        _, d, sonraki = adaylar[0]
+        _, adim, sonraki = adaylar[0]
 
         rota.append(sonraki)
         kalan.remove(sonraki)
-        toplam += d
+        toplam += adim
+
+    # 5) 15'in altında kaldıysa SADECE aynı cep içinde 420 m'ye kadar esnet.
+    if len(rota) < MIN_HEDEF:
+        kalan = [
+            x for x in secili_havuz
+            if x not in rota
+        ]
+
+        while kalan and len(rota) < MAX_ROTA:
+            mevcut = rota[-1]
+            uygun = []
+
+            for aday in kalan:
+                adim = mesafe(mevcut, aday)
+
+                if adim > 420:
+                    continue
+
+                if toplam + adim > MAX_TOPLAM:
+                    continue
+
+                if mesafe(merkez, aday) > KUME_YARICAPI:
+                    continue
+
+                uygun.append(
+                    (adim, -aday.get("lead_skoru", 0), aday)
+                )
+
+            if not uygun:
+                break
+
+            uygun.sort(key=lambda x: (x[0], x[1]))
+            adim, _, sonraki = uygun[0]
+
+            rota.append(sonraki)
+            kalan.remove(sonraki)
+            toplam += adim
 
     return rota
 
