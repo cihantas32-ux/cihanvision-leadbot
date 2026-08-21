@@ -606,18 +606,16 @@ def overpass_indir(query):
 # ============================================================
 
 def rota_olustur(isletmeler, start_lat, start_lon):
-    print("### ROUTE_ENGINE_V4_6_ACTIVE ###", flush=True)
+    print("### ROUTE_ENGINE_V4_7_ACTIVE ###", flush=True)
+
     if not isletmeler:
         return []
 
     HEDEF = min(MAX_ISLETME, 10)
-    MIN_HEDEF = min(8, HEDEF)
-    MAX_BASLANGIC = 1100
-    ANA_CEP = 600
-    GENISLETME_CEP = 850
+    MAX_ILK_UZAKLIK = 1200
+    MAX_TOPLAM = 2300
     NORMAL_ADIM = 320
-    GENISLETME_ADIM = 250
-    MAX_TOPLAM = 1900
+    KOPRU_ADIM = 650
 
     def mesafe(a, b):
         return haversine(a["lat"], a["lon"], b["lat"], b["lon"])
@@ -625,100 +623,63 @@ def rota_olustur(isletmeler, start_lat, start_lon):
     def baslangic_mesafe(a):
         return haversine(start_lat, start_lon, a["lat"], a["lon"])
 
-    yakin = [x for x in isletmeler if baslangic_mesafe(x) <= MAX_BASLANGIC]
-    if not yakin:
-        yakin = sorted(isletmeler, key=baslangic_mesafe)[:20]
+    # Başlangıca yakın tüm qualified lead'leri kullan.
+    havuz = [x for x in isletmeler if baslangic_mesafe(x) <= MAX_ILK_UZAKLIK]
 
-    merkez_adaylari = []
-    for merkez in yakin:
-        cevre = [x for x in yakin if mesafe(merkez, x) <= ANA_CEP]
-        adet = len(cevre)
-        if not adet:
-            continue
-        uzak = baslangic_mesafe(merkez)
-        puan = min(adet, HEDEF) * 100 - uzak * 0.75
-        if adet >= MIN_HEDEF:
-            puan += 250
-        merkez_adaylari.append((puan, adet, -uzak, merkez, cevre))
+    # 10'a yetmiyorsa en yakın qualified lead'lerle havuzu tamamla.
+    if len(havuz) < HEDEF:
+        for x in sorted(isletmeler, key=baslangic_mesafe):
+            if x not in havuz:
+                havuz.append(x)
+            if len(havuz) >= HEDEF:
+                break
 
-    if not merkez_adaylari:
+    if not havuz:
         return []
 
-    merkez_adaylari.sort(key=lambda x: (x[0], x[1], x[2]), reverse=True)
-    _, _, _, merkez, ana_havuz = merkez_adaylari[0]
-
-    ilk = min(ana_havuz, key=baslangic_mesafe)
+    # İlk lead: başlangıca en yakın işletme.
+    ilk = min(havuz, key=baslangic_mesafe)
     rota = [ilk]
+    kalan = [x for x in havuz if x is not ilk]
     toplam = baslangic_mesafe(ilk)
-    kullanilan = {id(ilk)}
 
-    def en_iyi_sonraki(havuz, max_adim, merkez_limit):
+    while kalan and len(rota) < HEDEF:
         mevcut = rota[-1]
-        adaylar = []
-        for aday in havuz:
-            if id(aday) in kullanilan:
-                continue
+
+        # Önce çok yakın devam noktalarını ara.
+        yakin_adaylar = []
+        for aday in kalan:
             adim = mesafe(mevcut, aday)
-            if adim > max_adim:
-                continue
-            if toplam + adim > MAX_TOPLAM:
-                continue
-            if mesafe(merkez, aday) > merkez_limit:
-                continue
+            if adim <= NORMAL_ADIM and toplam + adim <= MAX_TOPLAM:
+                yakin_adaylar.append((adim, -aday.get("lead_skoru", 0), aday))
 
-            devam = sum(
-                1 for diger in havuz
-                if id(diger) not in kullanilan
-                and diger is not aday
-                and mesafe(aday, diger) <= max_adim
-            )
-            maliyet = (
-                adim
-                + mesafe(merkez, aday) * 0.08
-                - min(devam, 6) * 12
-                - aday.get("lead_skoru", 0) * 0.20
-            )
-            adaylar.append((maliyet, adim, aday))
+        if yakin_adaylar:
+            yakin_adaylar.sort(key=lambda x: (x[0], x[1]))
+            adim, _, sonraki = yakin_adaylar[0]
+        else:
+            # Yakında lead kalmadıysa yalnızca bir sonraki en yakın qualified
+            # noktaya kontrollü köprü kur. Böylece 4'te kilitlenmez.
+            kopru_adaylar = []
+            for aday in kalan:
+                adim = mesafe(mevcut, aday)
+                if adim <= KOPRU_ADIM and toplam + adim <= MAX_TOPLAM:
+                    kopru_adaylar.append((adim, -aday.get("lead_skoru", 0), aday))
 
-        if not adaylar:
-            return None
-        adaylar.sort(key=lambda x: (x[0], x[1]))
-        return adaylar[0][1], adaylar[0][2]
-
-    # Önce mevcut kompakt ticari cebi doldur.
-    while len(rota) < HEDEF:
-        sonuc = en_iyi_sonraki(ana_havuz, NORMAL_ADIM, ANA_CEP)
-        if sonuc is None:
-            break
-        adim, sonraki = sonuc
-        rota.append(sonraki)
-        kullanilan.add(id(sonraki))
-        toplam += adim
-
-    # Yetmezse sadece rotanın ucundan kontrollü genişle.
-    genis_havuz = [x for x in yakin if mesafe(merkez, x) <= GENISLETME_CEP]
-
-    while len(rota) < HEDEF:
-        sonuc = en_iyi_sonraki(genis_havuz, GENISLETME_ADIM, GENISLETME_CEP)
-        if sonuc is None:
-            break
-        adim, sonraki = sonuc
-        rota.append(sonraki)
-        kullanilan.add(id(sonraki))
-        toplam += adim
-
-    # 8'in altında kalırsa küçük bir köprü toleransı.
-    if len(rota) < MIN_HEDEF:
-        while len(rota) < HEDEF:
-            sonuc = en_iyi_sonraki(genis_havuz, 340, GENISLETME_CEP)
-            if sonuc is None:
+            if not kopru_adaylar:
                 break
-            adim, sonraki = sonuc
-            rota.append(sonraki)
-            kullanilan.add(id(sonraki))
-            toplam += adim
 
-    print(f"### V4_6_ROUTE count={len(rota)} budget_m={round(toplam)} ###", flush=True)
+            kopru_adaylar.sort(key=lambda x: (x[0], x[1]))
+            adim, _, sonraki = kopru_adaylar[0]
+
+        rota.append(sonraki)
+        kalan.remove(sonraki)
+        toplam += adim
+
+    print(
+        f"### V4_7_ROUTE count={len(rota)} route_budget_m={round(toplam)} "
+        f"pool={len(havuz)} ###",
+        flush=True
+    )
     return rota
 
 
